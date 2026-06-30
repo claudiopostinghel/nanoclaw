@@ -1,0 +1,340 @@
+{% extends "base.html" %}
+{% block title %}{% if cliente_nome %}{{ cliente_nome }} – {% endif %}Prenotazioni clienti{% endblock %}
+{% block main_layout %}flex-1 w-full max-w-[1700px] mx-auto px-4 py-6{% endblock %}
+{% block content %}
+{# Pagina unica a 3 colonne (dati di produzione):
+   - sinistra: elenco di TUTTI i clienti con torta aggregata dello stato di gestione
+     di tutte le loro prenotazioni; ogni riga linka a /prenotazioni-clienti/<piva>
+     (semplice cambio di link → reload pieno, URL condivisibile).
+   - centro: i mesi del cliente selezionato (header collassabile + mini-torta mensile,
+     righe con stato SDI). Vuota finché non si seleziona un cliente.
+   - destra: viewer XML dell'autofattura collegata (iframe su /autofattura/<id>?embed=1). #}
+
+{% set status_meta = {
+  'VI': ('VI', '#94a3b8', 'Visto'),
+  'TC': ('TC', '#fbbf24', 'To Confirm'),
+  'TE': ('TE', '#38bdf8', 'To Emit'),
+  'IS': ('IS', '#4ade80', 'Issued'),
+  'CA': ('CA', '#f87171', 'Cancelled'),
+} %}
+
+{% if not db_ready %}
+<div class="max-w-3xl mx-auto rounded-xl border border-amber-700 bg-amber-900/20 px-4 py-4 text-amber-200 text-sm">
+  <i class="fa-solid fa-circle-info mr-1"></i>
+  <code class="text-xs bg-slate-800 border border-slate-700 rounded px-1 py-0.5">produzione.db</code>
+  non trovato. Lancia la skill <code class="text-xs bg-slate-800 border border-slate-700 rounded px-1 py-0.5">/ppp-import-produzione</code>
+  per importare la copia del database di produzione.
+</div>
+{% else %}
+
+<div class="flex gap-4 items-start">
+
+  {# ── Colonna 1: elenco clienti con torta aggregata (sticky) ──────────────── #}
+  <div class="shrink-0 sticky top-4 w-72 flex flex-col bg-slate-800 border border-slate-700 rounded-xl overflow-hidden"
+       style="height:calc(100vh - 6rem)">
+    <div class="px-3 py-2.5 border-b border-slate-700 shrink-0 space-y-2">
+      <div class="relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30 text-xs"></i>
+        <input id="pc-filter" type="text" placeholder="Filtra cliente o P.IVA…" autocomplete="off" spellcheck="false"
+               class="w-full rounded-lg border border-slate-700 bg-slate-900/60 pl-7 pr-2 py-1.5 text-xs text-white placeholder-white/30 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+      </div>
+      {# Filtro attivo di default: esclude le prenotazioni del mese corrente da torte
+         e totali (la gestione di questo mese è ancora in corso). #}
+      <button id="pc-escludi" type="button"
+              class="w-full px-2 py-1 rounded-lg text-xs font-medium border bg-emerald-700/40 text-emerald-200 border-emerald-700"
+              title="Nasconde da torte e totali le prenotazioni del mese corrente">
+        <i class="fa-solid fa-calendar-xmark mr-1"></i>Escludi {{ escludi_mese_label|capitalize }}
+      </button>
+    </div>
+    <div id="pc-list" class="fade-scroll flex-1 overflow-y-auto p-1.5 flex flex-col gap-0.5">
+      {% for c in clienti %}
+      {# Render iniziale = vista filtrata (_ex), perché il filtro "Escludi <mese>"
+         parte attivo. I data-* portano entrambe le viste per il toggle JS. #}
+      <a href="/prenotazioni-clienti/{{ c.piva }}"
+         class="pc-row flex items-center gap-2.5 px-2.5 py-2 rounded-lg border transition-colors
+                {% if c.piva == selected_piva %}bg-slate-700 border-slate-500{% else %}border-transparent hover:bg-slate-700/60 hover:border-slate-600{% endif %}"
+         data-search="{{ (c.name ~ ' ' ~ c.piva)|lower }}"
+         data-pie="{{ c.pie }}" data-pie-ex="{{ c.pie_ex }}"
+         data-todo="{{ c.todo }}" data-todo-ex="{{ c.todo_ex }}"
+         data-ok="{{ c.ok }}" data-ok-ex="{{ c.ok_ex }}"
+         data-nres="{{ c.nres }}" data-nres-ex="{{ c.nres_ex }}"
+         title="✓ {{ c.ok }} a posto · ⟳ {{ c.invio }} in invio · ✕ {{ c.todo }} da gestire">
+        <span class="pc-pie shrink-0 rounded-full" style="width:18px;height:18px;background:{{ c.pie_ex }}"></span>
+        <span class="min-w-0 flex-1">
+          <span class="block text-xs text-white truncate">{{ c.name }}</span>
+          <span class="block text-[10px] text-white/40 font-mono tabular-nums">{{ c.piva }}</span>
+        </span>
+        <span class="shrink-0 flex flex-row items-center gap-1.5 leading-tight text-[10px] font-medium tabular-nums">
+          <span class="pc-todo {% if c.todo_ex %}text-red-400{% else %}text-white/25{% endif %}" style="display:inline-block;width:3ch;text-align:right">{{ c.todo_ex }}</span>
+          <span class="pc-ok {% if c.ok_ex %}text-emerald-400{% else %}text-white/25{% endif %}" style="display:inline-block;width:3ch;text-align:right">{{ c.ok_ex }}</span>
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="px-3 py-1.5 border-t border-slate-700 shrink-0">
+      <p id="pc-count" class="text-white/40 text-[10px] font-medium">{{ clienti|length }} clienti</p>
+    </div>
+  </div>
+
+  {# ── Colonna 2: prenotazioni per mese del cliente selezionato (sticky) ───── #}
+  <div class="shrink-0 sticky top-4 w-80 flex flex-col bg-slate-800 border border-slate-700 rounded-xl overflow-hidden"
+       style="height:calc(100vh - 6rem)">
+    {% if month_groups is none %}
+    <div class="h-full flex flex-col items-center justify-center text-white/35 text-sm px-6 text-center">
+      <i class="fa-solid fa-arrow-left text-xl mb-2 text-white/20"></i>
+      Seleziona un cliente a sinistra per vedere le sue prenotazioni.
+    </div>
+    {% else %}
+    <div class="px-3 py-2.5 border-b border-slate-700 shrink-0 space-y-2">
+      <div class="min-w-0">
+        <h1 class="text-sm font-medium text-white truncate" title="{{ cliente_nome }}">{{ cliente_nome }}</h1>
+        <p class="text-[10px] text-white/40 font-mono tabular-nums">P.IVA {{ cliente_piva }} · {{ n_tot }} pren.</p>
+      </div>
+      <div class="relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30 text-xs"></i>
+        <input id="pcd-filter" type="text" placeholder="Filtra…" autocomplete="off" spellcheck="false"
+               class="w-full rounded-lg border border-slate-700 bg-slate-900/60 pl-7 pr-2 py-1.5 text-xs text-white placeholder-white/30 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono uppercase">
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="pcd-pending" type="button"
+                class="flex-1 px-2 py-1 rounded-lg text-xs font-medium text-white/70 border border-slate-700 hover:bg-slate-700/60">
+          <i class="fa-solid fa-bell mr-1"></i>Solo da gestire
+        </button>
+        <button id="pcd-toggle-all" type="button"
+                class="px-2 py-1 rounded-lg text-xs font-medium text-white/55 border border-slate-700 hover:bg-slate-700/60"
+                title="Espandi / comprimi tutti i mesi">
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+      </div>
+    </div>
+
+    <div id="pcd-list" class="fade-scroll flex-1 overflow-y-auto p-1.5 flex flex-col gap-0.5">
+      {% for g in month_groups %}
+      <div class="pcd-month" data-month="{{ g.key }}" data-total="{{ g.total }}">
+        <button type="button"
+                class="pcd-mhead w-full flex items-center gap-2 px-2 py-1.5 mt-1 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-700/60 text-left select-none">
+          <i class="pcd-chev fa-solid fa-chevron-right text-[9px] text-white/40 shrink-0" style="transition:transform .15s"></i>
+          <span class="shrink-0 rounded-full" style="width:14px;height:14px;background:{{ g.pie }}"
+                title="✓ {{ g.ok }} a posto · ⟳ {{ g.invio }} in invio · ✕ {{ g.todo }} da gestire"></span>
+          <span class="pcd-mlabel flex-1 min-w-0 truncate text-[11px] font-semibold uppercase tracking-wider text-white/55">{{ g.label }}</span>
+          <span class="shrink-0 flex flex-row items-center gap-1.5 leading-tight text-[10px] font-medium tabular-nums">
+            <span class="{% if g.todo %}text-red-400{% else %}text-white/25{% endif %}" style="display:inline-block;width:3ch;text-align:right">{{ g.todo }}</span>
+            <span class="{% if g.ok %}text-emerald-400{% else %}text-white/25{% endif %}" style="display:inline-block;width:3ch;text-align:right">{{ g.ok }}</span>
+          </span>
+        </button>
+        <div class="pcd-mbody hidden flex-col gap-0.5 mt-0.5">
+          {% for f in g.prenotazioni %}
+          {% set sm = status_meta.get(f.status, (f.status or '··', '#64748b', f.status)) %}
+          <button type="button"
+                  class="pcd-row w-full px-2.5 py-1.5 rounded-lg border border-transparent hover:border-slate-600 hover:bg-slate-700/60 text-left{% if f.done %} opacity-50 hover:opacity-100 transition-opacity{% endif %}"
+                  data-search="{{ (f.cc ~ ' ' ~ f.guest)|lower }}"
+                  data-done="{{ '1' if f.done else '' }}"
+                  data-af="{{ f.af_id if f.af_id is not none else '' }}"
+                  title="{{ f.guest }}{% if f.numero %} · n.{{ f.numero }}{% endif %}">
+            <span class="flex items-center gap-1.5 min-w-0">
+              <span class="shrink-0 inline-flex items-center justify-center rounded text-[9px] font-bold tabular-nums" style="width:1.4rem;height:1rem;color:{{ sm[1] }};background:{{ sm[1] }}1f" title="{{ sm[2] }}">{{ sm[0] }}</span>
+              <span class="text-xs font-mono {% if f.af_id is not none %}text-white/80{% else %}text-white/40{% endif %} truncate">{{ f.cc }}</span>
+              <span class="ml-auto shrink-0">
+                {%- if f.ricevuta -%}
+                  <i class="fa-solid fa-circle-check text-[11px] text-emerald-400" title="Inviata a SDI e consegnata (RC)"></i>
+                {%- elif f.inviata -%}
+                  <i class="fa-solid fa-paper-plane text-[11px] text-amber-400" title="Inviata a SDI, in attesa di RC"></i>
+                {%- elif f.gestita -%}
+                  <i class="fa-solid fa-ban text-[11px] text-emerald-400/70" title="Cancellata: nessuna autofattura da emettere"></i>
+                {%- else -%}
+                  <i class="fa-regular fa-circle text-[10px] text-white/20" title="Nessuna autofattura collegata"></i>
+                {%- endif -%}
+              </span>
+            </span>
+            {% if f.guest %}<span class="block text-[10px] text-white/35 truncate">{{ f.guest }}</span>{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="px-3 py-1.5 border-t border-slate-700 shrink-0">
+      <p id="pcd-count" class="text-white/40 text-[10px] font-medium">{{ n_tot }} prenotazioni</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── Colonna 3: viewer autofattura (iframe sul viewer esistente) ─────────── #}
+  <div class="flex-1 min-w-0 sticky top-4" style="height:calc(100vh - 6rem)">
+    <div id="pcd-placeholder" class="h-full flex flex-col items-center justify-center border border-dashed border-slate-700 rounded-xl text-white/40 text-sm">
+      <i class="fa-solid fa-file-invoice text-2xl mb-2 text-white/20"></i>
+      Scegli una prenotazione con autofattura collegata.
+    </div>
+    <div id="pcd-none" class="hidden h-full flex flex-col items-center justify-center border border-dashed border-slate-700 rounded-xl text-white/40 text-sm">
+      <i class="fa-regular fa-circle text-2xl mb-2 text-white/20"></i>
+      Nessuna autofattura collegata a questa prenotazione.
+    </div>
+    <iframe id="pcd-frame" class="hidden w-full h-full rounded-xl border border-slate-700 bg-slate-900"></iframe>
+  </div>
+
+</div>
+
+{% endif %}
+
+<script>
+  // ── Filtro elenco clienti (colonna 1) + toggle "Escludi <mese>" ──────────
+  (function () {
+    const input = document.getElementById('pc-filter');
+    if (!input) return;
+    const list   = document.getElementById('pc-list');
+    const rows   = Array.from(document.querySelectorAll('.pc-row'));
+    const count  = document.getElementById('pc-count');
+    const escBtn = document.getElementById('pc-escludi');
+    let escludiMese = true;  // filtro attivo di default (vista _ex)
+
+    // Applica a una riga la vista corrente (completa o esclusa-mese-corrente):
+    // colore torta, contatori todo/ok e relative classi di colore.
+    function renderRow(r) {
+      const d = r.dataset;
+      const todo = escludiMese ? d.todoEx : d.todo;
+      const ok   = escludiMese ? d.okEx   : d.ok;
+      r.querySelector('.pc-pie').style.background = escludiMese ? d.pieEx : d.pie;
+      const tEl = r.querySelector('.pc-todo');
+      tEl.textContent = todo;
+      tEl.className = 'pc-todo ' + (+todo ? 'text-red-400' : 'text-white/25');
+      tEl.style.cssText = 'display:inline-block;width:3ch;text-align:right';
+      const oEl = r.querySelector('.pc-ok');
+      oEl.textContent = ok;
+      oEl.className = 'pc-ok ' + (+ok ? 'text-emerald-400' : 'text-white/25');
+      oEl.style.cssText = 'display:inline-block;width:3ch;text-align:right';
+    }
+
+    // Riordina il DOM per la vista corrente: più prenotazioni in alto, i clienti
+    // svuotati dal filtro finiscono in fondo (stesso criterio del sort server).
+    function reorder() {
+      const sorted = rows.slice().sort((a, b) => {
+        const na = +(escludiMese ? a.dataset.nresEx : a.dataset.nres);
+        const nb = +(escludiMese ? b.dataset.nresEx : b.dataset.nres);
+        if (nb !== na) return nb - na;
+        return a.dataset.search.localeCompare(b.dataset.search);
+      });
+      sorted.forEach(r => list.appendChild(r));
+    }
+
+    function applyFilter() {
+      const q = input.value.trim().toLowerCase();
+      let visible = 0;
+      rows.forEach(r => {
+        const matchesQ = !q || r.dataset.search.includes(q);
+        // Con "Escludi <mese>" attivo, togli dalla lista i clienti rimasti a zero
+        // prenotazioni una volta escluso il mese corrente (vista _ex): altrimenti
+        // resterebbero visibili con tutti i contatori a 0.
+        const nres = +(escludiMese ? r.dataset.nresEx : r.dataset.nres);
+        const nonEmpty = !escludiMese || nres > 0;
+        const ok = matchesQ && nonEmpty;
+        r.classList.toggle('hidden', !ok);
+        if (ok) visible++;
+      });
+      count.textContent = visible + ' client' + (visible === 1 ? 'e' : 'i');
+    }
+
+    input.addEventListener('input', applyFilter);
+
+    if (escBtn) escBtn.addEventListener('click', () => {
+      escludiMese = !escludiMese;
+      ['bg-emerald-700/40', 'text-emerald-200', 'border-emerald-700'].forEach(c =>
+        escBtn.classList.toggle(c, escludiMese));
+      escBtn.classList.toggle('text-white/70', !escludiMese);
+      escBtn.classList.toggle('border-slate-700', !escludiMese);
+      rows.forEach(renderRow);
+      reorder();
+      applyFilter();
+    });
+
+    // Stato iniziale: righe già renderizzate lato server sulla vista _ex; allinea
+    // i contatori del footer.
+    applyFilter();
+  })();
+
+  // ── Mesi + viewer del cliente selezionato (colonne 2 e 3) ────────────────
+  (function () {
+    const list = document.getElementById('pcd-list');
+    const frame = document.getElementById('pcd-frame');
+    const ph    = document.getElementById('pcd-placeholder');
+    const none  = document.getElementById('pcd-none');
+    if (!frame || !ph || !none) return;
+
+    function showPanel(el) {
+      [ph, none, frame].forEach(x => x.classList.add('hidden'));
+      el.classList.remove('hidden');
+    }
+    if (!list) return;  // nessun cliente selezionato: solo placeholder a destra
+
+    const N_TOT  = {{ (n_tot or 0)|tojson }};
+    const months = Array.from(list.querySelectorAll('.pcd-month'));
+    const input  = document.getElementById('pcd-filter');
+    const pend    = document.getElementById('pcd-pending');
+    const toggleAll = document.getElementById('pcd-toggle-all');
+    const count  = document.getElementById('pcd-count');
+    let onlyPending = false;
+
+    function setOpen(m, open) {
+      m.querySelector('.pcd-mbody').style.display = open ? 'flex' : 'none';
+      m.querySelector('.pcd-chev').style.transform = open ? 'rotate(90deg)' : '';
+      m.classList.toggle('open', open);
+    }
+
+    function apply() {
+      const q = (input.value || '').trim().toLowerCase();
+      const active = q !== '' || onlyPending;
+      let totalVisible = 0;
+      months.forEach(m => {
+        let vis = 0;
+        m.querySelectorAll('.pcd-row').forEach(r => {
+          const ok = (!q || r.dataset.search.includes(q)) && (!onlyPending || !r.dataset.done);
+          r.classList.toggle('hidden', !ok);
+          if (ok) vis++;
+        });
+        const mc = m.querySelector('.pcd-mcount');
+        if (mc) mc.textContent = active ? vis : m.dataset.total;
+        m.classList.remove('hidden');
+        if (active) {
+          m.style.opacity = vis === 0 ? '0.5' : '';
+          setOpen(m, q !== '' && vis > 0);
+        } else {
+          m.style.opacity = '';
+          setOpen(m, false);
+        }
+        totalVisible += vis;
+      });
+      count.textContent = (active ? totalVisible : N_TOT) + ' prenotazioni';
+    }
+
+    months.forEach(m => m.querySelector('.pcd-mhead').addEventListener('click', () => {
+      setOpen(m, !m.classList.contains('open'));
+    }));
+
+    toggleAll.addEventListener('click', () => {
+      const anyClosed = months.some(m => !m.classList.contains('hidden') && !m.classList.contains('open'));
+      months.forEach(m => { if (!m.classList.contains('hidden')) setOpen(m, anyClosed); });
+      toggleAll.querySelector('i').className = 'fa-solid ' + (anyClosed ? 'fa-chevron-up' : 'fa-chevron-down');
+    });
+
+    input.addEventListener('input', apply);
+    pend.addEventListener('click', () => {
+      onlyPending = !onlyPending;
+      pend.classList.toggle('bg-emerald-700/40', onlyPending);
+      pend.classList.toggle('text-emerald-200', onlyPending);
+      pend.classList.toggle('border-emerald-700', onlyPending);
+      apply();
+    });
+
+    list.addEventListener('click', (e) => {
+      const r = e.target.closest('.pcd-row');
+      if (!r) return;
+      list.querySelectorAll('.pcd-row').forEach(x => x.classList.remove('bg-slate-700', 'border-slate-500'));
+      r.classList.add('bg-slate-700', 'border-slate-500');
+      const af = r.dataset.af;
+      if (af) { frame.src = '/autofattura/' + af + '?embed=1'; showPanel(frame); }
+      else { showPanel(none); }
+    });
+
+    apply();
+  })();
+</script>
+{% endblock %}
