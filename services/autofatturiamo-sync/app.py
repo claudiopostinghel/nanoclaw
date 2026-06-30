@@ -442,10 +442,16 @@ def api_summary_live():
 
 # ── Riassunto AI sviluppo, persistito + rigenerato solo quando cambiano le PR ──
 
+# Bump quando cambia il prompt/stile del riassunto: invalida la cache una volta
+# (la firma cambia anche senza nuove PR).
+_DEV_SUMMARY_VERSION = "v2-brief"
+
+
 def _dev_summary_signature(prs) -> str:
-    """Firma dell'insieme di PR (numeri ordinati) per decidere se rigenerare."""
+    """Firma dell'insieme di PR (numeri ordinati) + versione prompt, per decidere
+    se rigenerare."""
     nums = sorted(int(p["number"]) for p in prs if p.get("number") is not None)
-    return ",".join(str(n) for n in nums)
+    return _DEV_SUMMARY_VERSION + ":" + ",".join(str(n) for n in nums)
 
 
 def _get_development_summary(*, force=False) -> dict:

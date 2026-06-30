@@ -16,8 +16,10 @@
           <div class="text-[10px] uppercase tracking-wide text-white/30 mb-1">📅 Demo prenotate</div>
           {% if n_demo == 0 %}
             <div class="text-3xl font-bold text-amber-400 tabular-nums leading-none">0</div>
-            <div class="text-[10px] text-amber-400/80 flex items-center gap-1 mt-1.5">
-              <i class="fa-solid fa-triangle-exclamation"></i> nessuna demo
+            <div class="mt-2">
+              <span class="inline-flex items-center gap-1 text-[10px] text-amber-300/90 border border-amber-700/50 rounded px-1.5 py-0.5">
+                <i class="fa-solid fa-triangle-exclamation"></i> nessuna demo
+              </span>
             </div>
           {% else %}
             <div class="text-3xl font-bold text-white tabular-nums leading-none">{{ n_demo }}</div>
@@ -36,8 +38,10 @@
           <div class="text-[10px] uppercase tracking-wide text-white/30 mb-1">🚀 Nuovi clienti</div>
           {% if n_clienti == 0 %}
             <div class="text-3xl font-bold text-amber-400 tabular-nums leading-none">0</div>
-            <div class="text-[10px] text-amber-400/80 flex items-center gap-1 mt-1.5">
-              <i class="fa-solid fa-triangle-exclamation"></i> nessun cliente
+            <div class="mt-2">
+              <span class="inline-flex items-center gap-1 text-[10px] text-amber-300/90 border border-amber-700/50 rounded px-1.5 py-0.5">
+                <i class="fa-solid fa-triangle-exclamation"></i> nessun cliente
+              </span>
             </div>
           {% else %}
             <div class="text-3xl font-bold text-white tabular-nums leading-none">{{ n_clienti }}</div>
