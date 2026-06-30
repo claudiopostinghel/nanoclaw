@@ -11,7 +11,7 @@
       </div>
       <div class="grid grid-cols-4 divide-x divide-slate-700/40">
 
-        {# 📅 Demo prenotate — warning a zero #}
+        {# 📅 Demo prenotate — warning a zero; sotto, chi ha prenotato #}
         <div class="p-3 min-h-[6rem]">
           <div class="text-[10px] uppercase tracking-wide text-white/30 mb-1">📅 Demo prenotate</div>
           {% if n_demo == 0 %}
@@ -21,6 +21,13 @@
             </div>
           {% else %}
             <div class="text-3xl font-bold text-white tabular-nums leading-none">{{ n_demo }}</div>
+            <div class="mt-1.5 space-y-0.5">
+              {% for nome in demo_nomi %}
+                <div class="text-[10px] text-white/45 truncate">
+                  <span class="text-white/30">prenotato:</span> {{ nome }}
+                </div>
+              {% endfor %}
+            </div>
           {% endif %}
         </div>
 

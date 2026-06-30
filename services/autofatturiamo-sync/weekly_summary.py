@@ -157,32 +157,56 @@ def _nuovi_clienti(since_dt: datetime, until_dt: datetime | None = None):
     return out
 
 
-def _demo_prenotate(since_dt: datetime, until_dt: datetime | None = None) -> int:
-    """Numero di demo (meeting cal.com) **prenotate** nell'intervallo
-    [since_dt, until_dt) (until_dt None = fino ad ora).
+# Solo i veri meeting di vendita: l'event type cal.com «Demo Autofatturiamo — <nome>».
+# Gli altri tipi (Assistenza, Attivazione, Prova Gratuita, Meeting, Check…) NON
+# sono demo e vanno esclusi dal conteggio.
+_DEMO_TYPE_PREFIX = "Demo Autofatturiamo"
+
+
+def _demo_prenotazioni(since_dt: datetime, until_dt: datetime | None = None) -> list[dict]:
+    """Demo (event type cal.com «Demo Autofatturiamo — …») **prenotate**
+    nell'intervallo [since_dt, until_dt) (until_dt None = fino ad ora).
 
     «Prenotata» = la PRENOTAZIONE è avvenuta nella finestra (colonna `created`
     del booking), non l'orario in cui la demo si svolge — è l'indicatore di
-    attività commerciale del periodo. Una demo è un evento cal.com
-    (`cal_booking_id` non nullo) non annullato. `gcal_events.created` è sempre
-    ISO 8601 in UTC (gcal_client._format_dt), quindi convertiamo a UTC anche i
-    bound e confrontiamo come stringhe ISO omogenee.
+    attività commerciale del periodo. Esclude gli annullati. `gcal_events.created`
+    è sempre ISO 8601 in UTC (gcal_client._format_dt), quindi convertiamo a UTC
+    anche i bound e confrontiamo come stringhe ISO omogenee.
+
+    Ritorna lista di dict `{nome, created}` (nome = prospect che ha prenotato),
+    ordinata per prenotazione più recente.
     """
     from app import db
     since_utc = since_dt.astimezone(timezone.utc).isoformat()
+    like = _DEMO_TYPE_PREFIX + "%"
     sql = (
-        "SELECT COUNT(*) AS n FROM gcal_events "
+        "SELECT cal_prospect_name, summary, created FROM gcal_events "
         "WHERE cal_booking_id IS NOT NULL AND created IS NOT NULL "
         "  AND created >= ? "
         "  AND (status IS NULL OR upper(status) != 'CANCELLED') "
+        "  AND (cal_event_type LIKE ? "
+        "       OR (cal_event_type IS NULL AND summary LIKE ?)) "
     )
-    params = [since_utc]
+    params = [since_utc, like, like]
     if until_dt is not None:
         sql += "AND created < ? "
         params.append(until_dt.astimezone(timezone.utc).isoformat())
+    sql += "ORDER BY created DESC"
     with db() as conn:
-        row = conn.execute(sql, params).fetchone()
-    return int(row["n"] or 0)
+        rows = conn.execute(sql, params).fetchall()
+    out = []
+    for r in rows:
+        nome = (r["cal_prospect_name"] or "").strip()
+        if not nome:  # fallback: «Demo Autofatturiamo — <Nome>» dal summary
+            s = r["summary"] or ""
+            nome = s.split("—", 1)[-1].strip() if "—" in s else ""
+        out.append({"nome": nome or "(senza nome)", "created": r["created"]})
+    return out
+
+
+def _demo_prenotate(since_dt: datetime, until_dt: datetime | None = None) -> int:
+    """Numero di demo prenotate nella finestra (vedi `_demo_prenotazioni`)."""
+    return len(_demo_prenotazioni(since_dt, until_dt))
 
 
 # ───────────────────────────── sezione Development ──────────────────────────
@@ -474,9 +498,11 @@ def summary_live_data(now: datetime | None = None, *,
     dev = _dev_stats(dev_repo, since_str, None)
     eco = _economics(now)
     corr = eco["corrente"]
+    demo = _demo_prenotazioni(period_start, None)
     return {
         "window_days": window_days,
-        "n_demo": _demo_prenotate(period_start, None),
+        "n_demo": len(demo),
+        "demo_nomi": [d["nome"] for d in demo],
         "n_clienti": len(_nuovi_clienti(period_start, None)),
         "dev_ok": dev["ok"],
         "n_pr": dev["n_pr"],
