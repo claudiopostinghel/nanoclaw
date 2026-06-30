@@ -7,7 +7,7 @@
   <div class="overflow-x-auto">
     <div class="min-w-[480px]">
       <div class="px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-white/25 border-b border-slate-700/40 bg-slate-800/40">
-        Stato azienda · ultimi {{ window_days }} giorni
+        Stato azienda · {% if window_days == 7 %}ultima settimana{% else %}ultimi {{ window_days }} giorni{% endif %}
       </div>
       <div class="grid grid-cols-4 divide-x divide-slate-700/40">
 
@@ -44,10 +44,17 @@
           {% endif %}
         </div>
 
-        {# 💻 PR integrate #}
+        {# 💻 PR integrate — pulsante riassunto AI (modale) #}
         <div class="p-3 min-h-[6rem]">
           <div class="text-[10px] uppercase tracking-wide text-white/30 mb-1">💻 PR integrate</div>
           <div class="text-3xl font-bold text-white tabular-nums leading-none">{{ n_pr if dev_ok else '—' }}</div>
+          {% if dev_ok and n_pr > 0 %}
+            <button type="button"
+                    onclick="openPageModal('/development-summary', 'Riassunto sviluppo', 'lg')"
+                    class="mt-2 inline-flex items-center gap-1 text-[10px] text-emerald-300/90 hover:text-emerald-200 border border-emerald-700/50 hover:border-emerald-600 rounded px-1.5 py-0.5 transition-colors">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Riassunto
+            </button>
+          {% endif %}
         </div>
 
         {# 💶 Ricavi mese corrente — proiezione (grande) + reale a oggi (piccolo) #}

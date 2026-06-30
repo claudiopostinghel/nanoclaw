@@ -440,6 +440,105 @@ def api_summary_live():
     return jsonify({"ok": True, "html": html})
 
 
+# ── Riassunto AI sviluppo, persistito + rigenerato solo quando cambiano le PR ──
+
+def _dev_summary_signature(prs) -> str:
+    """Firma dell'insieme di PR (numeri ordinati) per decidere se rigenerare."""
+    nums = sorted(int(p["number"]) for p in prs if p.get("number") is not None)
+    return ",".join(str(n) for n in nums)
+
+
+def _get_development_summary(*, force=False) -> dict:
+    """Riassunto AI sviluppo (modale «Riassunto»), persistito in
+    `development_summary_cache`. Rigenera (chiamata LLM via gateway OneCLI) SOLO
+    quando l'insieme di PR nella finestra cambia rispetto alla firma salvata —
+    cioè all'arrivo di una nuova PR (o quando una PR esce dalla finestra) — o se
+    `force=True`. Altrimenti riusa il markdown salvato. Se GitHub è momentaneamente
+    irraggiungibile e c'è una cache, la serve stantia invece di rigenerare errori.
+
+    Ritorna {'ok', 'html', 'markdown', 'generated_at', 'n_pr', 'stale'}."""
+    import development_summary
+    import weekly_summary
+    sc = _summary_config()
+    days = sc["window_days"]
+    now = datetime.now(fattura_xml.ROME_TZ)
+    since_str = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    dev = weekly_summary._dev_stats(sc["dev_repo"], since_str, None)
+    prs = dev["prs"] if dev["ok"] else []
+    signature = _dev_summary_signature(prs)
+
+    with db() as conn:
+        row = conn.execute(
+            "SELECT signature, markdown, generated_at "
+            "FROM development_summary_cache WHERE id=1"
+        ).fetchone()
+
+    cached_md = row["markdown"] if row else None
+
+    # GitHub giù: non rigenerare un errore sopra una cache buona.
+    if not dev["ok"]:
+        if cached_md:
+            return _dev_summary_payload(cached_md, row["generated_at"],
+                                        len(prs), stale=True)
+        md = "# 💻 Development\n\n_Dati GitHub non disponibili al momento._"
+        return _dev_summary_payload(md, None, 0, stale=True)
+
+    # Cache valida e firma invariata → riusa (nessun LLM).
+    if cached_md and not force and row["signature"] == signature:
+        return _dev_summary_payload(cached_md, row["generated_at"],
+                                    len(prs), stale=False)
+
+    # Firma cambiata (nuova PR) o force → rigenera e salva.
+    md = development_summary.build_development_markdown(
+        now=now, dev_repo=sc["dev_repo"], days=days,
+    )
+    generated_at = now.isoformat()
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO development_summary_cache (id, signature, markdown, generated_at) "
+            "VALUES (1, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET signature=excluded.signature, "
+            "markdown=excluded.markdown, generated_at=excluded.generated_at",
+            (signature, md, generated_at),
+        )
+    return _dev_summary_payload(md, generated_at, len(prs), stale=False)
+
+
+def _dev_summary_payload(md: str, generated_at, n_pr: int, *, stale: bool) -> dict:
+    label = None
+    if generated_at:
+        try:
+            label = _it_datetime(datetime.fromisoformat(generated_at))
+        except (ValueError, TypeError):
+            label = None
+    return {
+        "ok": True,
+        "html": markdown.markdown(md, extensions=["extra", "sane_lists"]),
+        "markdown": md,
+        "generated_at": generated_at,
+        "generated_at_label": label,
+        "n_pr": n_pr,
+        "stale": stale,
+    }
+
+
+@app.route("/development-summary")
+def development_summary_page():
+    """Pagina del riassunto AI sviluppo, aperta nel modale dalla dashboard
+    (iframe `?embed=1`). `?force=1` forza la rigenerazione. Riusa il markdown
+    salvato finché non cambia l'insieme di PR (vedi `_get_development_summary`)."""
+    force = request.args.get("force") in ("1", "true", "yes")
+    data = _get_development_summary(force=force)
+    return render_template(
+        "development_summary.html",
+        summary_html=data["html"],
+        generated_at_label=data["generated_at_label"],
+        stale=data["stale"],
+        embed=bool(request.args.get("embed")),
+    )
+
+
 @app.route("/api/internal/summary/send", methods=["POST"])
 def api_summary_send():
     """Costruisce e invia il messaggio "Stato azienda" su Telegram.
@@ -1283,6 +1382,20 @@ CREATE TABLE IF NOT EXISTS fatture_sdi_stato (
 """
 
 
+# Cache del riassunto AI sviluppo (modale «Riassunto» sotto PR integrate). Riga
+# singola (id=1). `signature` = insieme ordinato dei numeri PR nella finestra:
+# quando cambia (nuova PR integrata, o PR uscita dalla finestra) il riassunto
+# viene rigenerato; altrimenti si riusa quello salvato (no LLM ad ogni apertura).
+SCHEMA_DEVELOPMENT_SUMMARY = """
+CREATE TABLE IF NOT EXISTS development_summary_cache (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    signature TEXT,
+    markdown TEXT,
+    generated_at TEXT
+)
+"""
+
+
 def _rename_corrupt_db():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     corrupt_path = DB_PATH.replace(".db", f"_corrupt_{timestamp}.db")
@@ -1375,6 +1488,7 @@ def init_db():
         conn.execute(SCHEMA_RICAVI_MENSILI)
         conn.execute(SCHEMA_FATTURE_GENERATE)
         conn.execute(SCHEMA_FATTURE_SDI_STATO)
+        conn.execute(SCHEMA_DEVELOPMENT_SUMMARY)
         for _col, _sql in (
             ("attendees", "ALTER TABLE gcal_events ADD COLUMN attendees TEXT"),
             ("created", "ALTER TABLE gcal_events ADD COLUMN created TEXT"),

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Riassunto sviluppo – Autofatturiamo Operations{% endblock %}
+{% block main_layout %}{% if not embed %}max-w-3xl mx-auto{% endif %} px-4 py-6{% endblock %}
+{% block content %}
+  <div class="max-w-3xl mx-auto">
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div>
+        <p class="text-xs text-white/40 uppercase tracking-wide mb-1">Development</p>
+        <h1 class="text-xl font-bold text-white">Riassunto sviluppo</h1>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        {% if generated_at_label %}
+          <span class="text-xs text-white/40">aggiornato {{ generated_at_label }}{% if stale %} · cache{% endif %}</span>
+        {% endif %}
+        <a href="?force=1{% if embed %}&embed=1{% endif %}"
+           class="inline-flex items-center gap-1.5 text-xs text-white/70 border border-slate-600 hover:bg-slate-700 hover:text-white rounded-md px-2.5 py-1 transition-colors">
+          <i class="fa-solid fa-rotate"></i> Rigenera
+        </a>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-xl border border-slate-700 px-5 py-4
+                text-[15px] leading-relaxed text-slate-200
+                [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:text-white [&_h1]:mb-3
+                [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-white [&_h2]:mt-4 [&_h2]:mb-2
+                [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-white [&_h3]:mt-3 [&_h3]:mb-1
+                [&_p]:mb-3 [&_p:last-child]:mb-0
+                [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3
+                [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3
+                [&_li]:mb-1
+                [&_code]:bg-slate-900 [&_code]:text-sky-200 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[13px]
+                [&_a]:text-emerald-300 [&_a]:underline
+                [&_strong]:text-white [&_strong]:font-semibold
+                [&_em]:text-white/80">
+      {{ summary_html|safe }}
+    </div>
+  </div>
+{% endblock %}
