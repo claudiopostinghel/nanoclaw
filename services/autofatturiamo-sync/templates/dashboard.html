@@ -13,12 +13,11 @@
   <p class="text-xs text-white/40 uppercase tracking-wide mb-1">Overview</p>
   <h1 class="text-2xl font-bold text-white mb-6">Dashboard</h1>
 
-  {# Tabellina compatta «Stato azienda» live (dati principali del riassunto settimanale).
-     Caricata lazy via /api/internal/summary/live per non rallentare la home (chiamata GitHub). #}
-  <section id="summary-live"
-           class="bg-slate-800 rounded-xl border border-slate-700 border-l-[3px] border-l-emerald-400/70 px-5 py-4 mb-6 max-w-md">
+  {# Blocco «Stato azienda» live (KPI orizzontali in stile calendario).
+     Caricato lazy via /api/internal/summary/live per non rallentare la home (chiamata GitHub). #}
+  <section id="summary-live" class="mb-6">
     <div id="summary-live-body">
-      <div class="flex items-center gap-2 text-white/40 text-sm">
+      <div class="bg-slate-800 rounded-xl border border-slate-700 px-4 py-6 flex items-center gap-2 text-white/40 text-sm">
         <i class="fa-solid fa-spinner fa-spin"></i> Carico riassunto…
       </div>
     </div>
