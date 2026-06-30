@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_dashboard_tiles.html" import autofatture_tile, issued_allineare_tile, pagamenti_errori_tile, scarti_tile, pipeline_states_tile, senza_piva_odoo_tile, senza_codice_destinatario_tile, eventi_settimana_tile %}
+{% block title %}Dashboard – Autofatturiamo Operations{% endblock %}
+{% block body_class %}dash-right-rail{% endblock %}
+{% block main_layout %}max-w-screen-2xl mx-auto px-4 py-8{% endblock %}
+{% block content %}
+  {% set timeline_steps = [
+    {'label': 'Primo del mese', 'tile': 'pagamenti'},
+    {'label': '10 del mese'},
+    {'label': '15 del mese • scadenza invio', 'tile': 'autofatture'},
+    {'label': '30 del mese'},
+  ] %}
+  <p class="text-xs text-white/40 uppercase tracking-wide mb-1">Overview</p>
+  <h1 class="text-2xl font-bold text-white mb-6">Dashboard</h1>
+
+  {# Tabellina compatta «Stato azienda» live (dati principali del riassunto settimanale).
+     Caricata lazy via /api/internal/summary/live per non rallentare la home (chiamata GitHub). #}
+  <section id="summary-live"
+           class="bg-slate-800 rounded-xl border border-slate-700 border-l-[3px] border-l-emerald-400/70 px-5 py-4 mb-6 max-w-md">
+    <div id="summary-live-body">
+      <div class="flex items-center gap-2 text-white/40 text-sm">
+        <i class="fa-solid fa-spinner fa-spin"></i> Carico riassunto…
+      </div>
+    </div>
+  </section>
+  <script>
+    (function () {
+      var section = document.getElementById('summary-live');
+      var body = document.getElementById('summary-live-body');
+      if (!section || !body) return;
+      fetch('/api/internal/summary/live')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok && d.html) { body.innerHTML = d.html; }
+          else { section.remove(); }
+        })
+        .catch(function () { section.remove(); });
+    })();
+  </script>
+
+  <div class="mb-6">
+    {{ eventi_settimana_tile(eventi_settimana) }}
+  </div>
+
+  <div class="mb-6">
+    {% for step in timeline_steps %}
+      <div class="flex items-start gap-3 relative">
+        {# linea che collega questo pallino al successivo #}
+        {% if not loop.last %}
+          <div class="absolute left-1.5 top-3 w-px h-full bg-slate-600"></div>
+        {% endif %}
+        {# pallino #}
+        <div class="relative z-10 w-3 h-3 mt-1 rounded-full bg-slate-500 shrink-0"></div>
+        {# etichetta + contenuto allineato al titoletto #}
+        <div class="flex-1 min-w-0 pb-6">
+          <span class="text-xs text-white/60">{{ step.label }}</span>
+          {% if step.tile == 'autofatture' %}
+            <div class="mt-2">
+              {{ scarti_tile(scarti_aperti) }}
+            </div>
+            <div class="mt-2">
+              {{ autofatture_tile(af_month, af_all, af_problems) }}
+            </div>
+            <div class="mt-2">
+              {{ issued_allineare_tile(issued_sync) }}
+            </div>
+          {% elif step.tile == 'pagamenti' %}
+            <div class="mt-2">
+              {{ pagamenti_errori_tile(pag_errori) }}
+            </div>
+          {% else %}
+            <div class="mt-2 h-16 rounded-lg border border-dashed border-slate-600"></div>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="mb-6">
+    {{ pipeline_states_tile(pipeline_cols, pipeline_counts) }}
+  </div>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    {{ senza_piva_odoo_tile(senza_piva_stats) }}
+    {{ senza_codice_destinatario_tile(senza_cd_stats) }}
+  </div>
+{% endblock %}
+
+{# Colonna Azioni come sidebar destra fissa, speculare alla navbar sinistra (solo dashboard).
+   Spacer in-flow riserva il gutter destro; l'aside è fixed/h-screen come _navbar.html. #}
+{% block right_rail %}
+  <div class="hidden xl:block shrink-0 w-96" aria-hidden="true"></div>
+  <aside class="hidden xl:flex fixed right-0 top-0 h-screen w-96 flex-col
+                bg-slate-800 border-l border-slate-700 z-40">
+    {% include "_actions_column.html" %}
+  </aside>
+  <style>
+    /* il rail copre l'angolo basso-destra: sposto a sinistra i controlli flottanti */
+    body.dash-right-rail #sync-box    { right: calc(24rem + 1rem); }
+    body.dash-right-rail #logout-form { right: calc(24rem + 0.25rem); }
+  </style>
+{% endblock %}

@@ -1,0 +1,36 @@
+{# Blocco compatto «Stato azienda» live per la Dashboard.
+   Renderizzato server-side da app._summary_live_html() (dati: weekly_summary.summary_live_data)
+   e iniettato lazy nella home. Solo numeri principali, niente testo lungo. #}
+<div class="flex items-center justify-between mb-3">
+  <h2 class="text-sm font-semibold text-white/90">Stato azienda</h2>
+  <span class="text-xs text-white/40">ultimi {{ window_days }} giorni</span>
+</div>
+<table class="w-full text-sm">
+  <tbody class="[&_td]:py-1.5 [&_td]:border-b [&_td]:border-slate-700/50 [&_tr:last-child_td]:border-b-0">
+    <tr>
+      <td class="text-white/60">📅 Demo prenotate</td>
+      <td class="text-right font-semibold text-white tabular-nums">{{ n_demo }}</td>
+    </tr>
+    <tr>
+      <td class="text-white/60">🚀 Nuovi clienti</td>
+      <td class="text-right font-semibold text-white tabular-nums">{{ n_clienti }}</td>
+    </tr>
+    <tr>
+      <td class="text-white/60">💻 PR integrate</td>
+      <td class="text-right font-semibold text-white tabular-nums">{{ n_pr if dev_ok else '—' }}</td>
+    </tr>
+    <tr>
+      <td class="text-white/60 align-top">💶 Ricavi {{ eco.label }}</td>
+      <td class="text-right">
+        {% if eco.has_data %}
+          <div class="font-semibold text-white tabular-nums">{{ eco.proiezione_eur }}
+            <span class="text-white/40 font-normal text-xs">proiez.</span>
+          </div>
+          <div class="text-xs text-white/45 tabular-nums">reale a oggi {{ eco.maturato_eur }}</div>
+        {% else %}
+          <span class="text-white/40">n/d</span>
+        {% endif %}
+      </td>
+    </tr>
+  </tbody>
+</table>
